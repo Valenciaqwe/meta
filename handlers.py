@@ -1,16 +1,14 @@
+import asyncio
+
 from aiogram import F, Router
 from aiogram.filters import CommandStart
 from aiogram.types import KeyboardButton, Message, ReplyKeyboardMarkup
-from openai import OpenAI
+from google import genai
 
 from config import settings
 
 router = Router()
-
-client = OpenAI(
-    api_key=settings.openai_api_key,
-    base_url=settings.openai_base_url,
-)
+client = genai.Client(api_key=settings.gemini_api_key)
 
 SYSTEM_PROMPT = """
 Ты — мудрый эксперт по китайской метафизике: Ба Цзы, Фэншуй и И Цзин.
@@ -46,18 +44,35 @@ def get_user_history(user_id: int) -> list[dict[str, str]]:
     return user_contexts[user_id]
 
 
-async def ask_gpt(user_id: int, user_text: str) -> str:
-    history = get_user_history(user_id)
-    history.append({"role": "user", "content": user_text})
+def build_prompt(history: list[dict[str, str]], user_text: str) -> str:
+    recent_history = history[-10:]
+    parts = [SYSTEM_PROMPT.strip(), "\nИстория диалога:"]
 
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}] + history[-12:]
+    for item in recent_history:
+        role = "Пользователь" if item["role"] == "user" else "Ассистент"
+        parts.append(f"{role}: {item['content']}")
 
-    response = client.chat.completions.create(
-        model=settings.openai_model,
-        messages=messages,
+    parts.append(f"Пользователь: {user_text}")
+    parts.append("Ассистент:")
+
+    return "\n".join(parts)
+
+
+def ask_gemini_sync(prompt: str) -> str:
+    response = client.models.generate_content(
+        model=settings.gemini_model,
+        contents=prompt,
     )
+    return response.text or "Не удалось получить ответ от Gemini."
 
-    answer = response.choices[0].message.content or "Не удалось получить ответ от модели."
+
+async def ask_gemini(user_id: int, user_text: str) -> str:
+    history = get_user_history(user_id)
+    prompt = build_prompt(history, user_text)
+
+    answer = await asyncio.to_thread(ask_gemini_sync, prompt)
+
+    history.append({"role": "user", "content": user_text})
     history.append({"role": "assistant", "content": answer})
 
     return answer
@@ -109,18 +124,18 @@ async def iching_button_handler(message: Message) -> None:
 
 
 @router.message(F.text)
-async def gpt_dialog_handler(message: Message) -> None:
+async def gemini_dialog_handler(message: Message) -> None:
     await message.answer("Думаю над вашим вопросом...")
 
     try:
-        answer = await ask_gpt(
+        answer = await ask_gemini(
             user_id=message.from_user.id,
             user_text=message.text,
         )
         await message.answer(answer)
     except Exception as error:
         await message.answer(
-            "Произошла ошибка при обращении к модели. "
-            "Проверьте ключ OpenRouter API, модель и попробуйте ещё раз."
+            "Произошла ошибка при обращении к Gemini. "
+            "Проверьте GEMINI_API_KEY, модель и попробуйте ещё раз."
         )
-        print(f"Model error: {error}")
+        print(f"Gemini error: {error}")
