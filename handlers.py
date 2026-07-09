@@ -10,6 +10,9 @@ from config import settings
 router = Router()
 client = genai.Client(api_key=settings.gemini_api_key)
 
+TELEGRAM_MESSAGE_LIMIT = 4096
+SAFE_MESSAGE_LIMIT = 3900
+
 SYSTEM_PROMPT = """
 Ты — мудрый эксперт по китайской метафизике: Ба Цзы, Фэншуй и И Цзин.
 
@@ -42,6 +45,48 @@ def get_user_history(user_id: int) -> list[dict[str, str]]:
     if user_id not in user_contexts:
         user_contexts[user_id] = []
     return user_contexts[user_id]
+
+
+def split_text(text: str, max_length: int = SAFE_MESSAGE_LIMIT) -> list[str]:
+    if len(text) <= max_length:
+        return [text]
+
+    chunks: list[str] = []
+    current = ""
+
+    for paragraph in text.split("\n\n"):
+        if len(paragraph) > max_length:
+            words = paragraph.split(" ")
+            for word in words:
+                if len(current) + len(word) + 1 > max_length:
+                    if current.strip():
+                        chunks.append(current.strip())
+                    current = word
+                else:
+                    current = f"{current} {word}".strip()
+            continue
+
+        candidate = f"{current}\n\n{paragraph}".strip() if current else paragraph
+        if len(candidate) > max_length:
+            if current.strip():
+                chunks.append(current.strip())
+            current = paragraph
+        else:
+            current = candidate
+
+    if current.strip():
+        chunks.append(current.strip())
+
+    return chunks
+
+
+async def send_long_message(message: Message, text: str) -> None:
+    chunks = split_text(text)
+    total = len(chunks)
+
+    for index, chunk in enumerate(chunks, start=1):
+        prefix = f"Часть {index}/{total}\n\n" if total > 1 else ""
+        await message.answer(prefix + chunk)
 
 
 def build_prompt(history: list[dict[str, str]], user_text: str) -> str:
@@ -132,7 +177,7 @@ async def gemini_dialog_handler(message: Message) -> None:
             user_id=message.from_user.id,
             user_text=message.text,
         )
-        await message.answer(answer)
+        await send_long_message(message, answer)
     except Exception as error:
         await message.answer(
             "Произошла ошибка при обращении к Gemini. "
