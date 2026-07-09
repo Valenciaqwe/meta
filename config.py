@@ -3,9 +3,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     telegram_bot_token: str
-    openai_api_key: str
-    openai_base_url: str = "https://openrouter.ai/api/v1"
-    openai_model: str = "google/gemma-3-27b-it:free"
+    gemini_api_key: str
+    gemini_model: str = "gemini-2.5-flash"
 
     model_config = SettingsConfigDict(
         env_file=".env",
