@@ -6,7 +6,11 @@ from openai import OpenAI
 from config import settings
 
 router = Router()
-client = OpenAI(api_key=settings.openai_api_key)
+
+client = OpenAI(
+    api_key=settings.openai_api_key,
+    base_url=settings.openai_base_url,
+)
 
 SYSTEM_PROMPT = """
 Ты — мудрый эксперт по китайской метафизике: Ба Цзы, Фэншуй и И Цзин.
@@ -44,18 +48,16 @@ def get_user_history(user_id: int) -> list[dict[str, str]]:
 
 async def ask_gpt(user_id: int, user_text: str) -> str:
     history = get_user_history(user_id)
-
     history.append({"role": "user", "content": user_text})
 
     messages = [{"role": "system", "content": SYSTEM_PROMPT}] + history[-12:]
 
-    response = client.responses.create(
+    response = client.chat.completions.create(
         model=settings.openai_model,
-        input=messages,
+        messages=messages,
     )
 
-    answer = response.output_text
-
+    answer = response.choices[0].message.content or "Не удалось получить ответ от модели."
     history.append({"role": "assistant", "content": answer})
 
     return answer
@@ -118,7 +120,7 @@ async def gpt_dialog_handler(message: Message) -> None:
         await message.answer(answer)
     except Exception as error:
         await message.answer(
-            "Произошла ошибка при обращении к GPT. "
-            "Проверьте ключ OpenAI API и попробуйте ещё раз."
+            "Произошла ошибка при обращении к модели. "
+            "Проверьте ключ OpenRouter API, модель и попробуйте ещё раз."
         )
-        print(f"OpenAI error: {error}")
+        print(f"Model error: {error}")
